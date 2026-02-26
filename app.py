@@ -49,21 +49,29 @@ if df is None:
     st.stop()
 
 # =====================================================
-# SMART DATA CLEANING
+# SMART NUMERIC CLEANING
 # =====================================================
 
-# Convert possible numeric text to numeric
 for col in df.columns:
-    try:
-        df[col] = pd.to_numeric(df[col])
-    except:
-        pass
+    if df[col].dtype == "object":
+        cleaned = (
+            df[col]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace("₹", "", regex=False)
+            .str.replace("$", "", regex=False)
+            .str.replace("€", "", regex=False)
+            .str.strip()
+        )
+        try:
+            df[col] = pd.to_numeric(cleaned)
+        except:
+            pass
 
-# Detect column types
-numeric_columns = df.select_dtypes(include=np.number).columns.tolist()
-categorical_columns = df.select_dtypes(include="object").columns.tolist()
+# =====================================================
+# DATE DETECTION
+# =====================================================
 
-# Detect date columns
 date_columns = []
 for col in df.columns:
     try:
@@ -73,6 +81,20 @@ for col in df.columns:
             date_columns.append(col)
     except:
         pass
+
+# =====================================================
+# COLUMN TYPE DETECTION
+# =====================================================
+
+numeric_columns = [
+    col for col in df.columns
+    if pd.api.types.is_numeric_dtype(df[col]) and df[col].notna().sum() > 0
+]
+
+categorical_columns = [
+    col for col in df.columns
+    if df[col].dtype == "object"
+]
 
 # =====================================================
 # DATA PREVIEW
@@ -138,12 +160,12 @@ filtered_df = filtered_df.sort_values(
 st.dataframe(filtered_df, use_container_width=True)
 
 # =====================================================
-# AUTO KPI DASHBOARD
+# KPI DASHBOARD
 # =====================================================
 
 st.subheader("📈 Intelligent KPI Dashboard")
 
-if selected_numeric:
+if selected_numeric and df[selected_numeric].notna().sum() > 0:
     total_value = df[selected_numeric].sum()
     avg_value = df[selected_numeric].mean()
     max_value = df[selected_numeric].max()
@@ -153,7 +175,7 @@ if selected_numeric:
     col2.metric("Average", f"{avg_value:,.2f}")
     col3.metric("Maximum", f"{max_value:,.2f}")
 else:
-    st.warning("No numeric column detected.")
+    st.warning("No valid numeric column detected.")
 
 # =====================================================
 # CATEGORY ANALYSIS
@@ -162,19 +184,27 @@ else:
 if selected_category and selected_numeric:
     grouped = df.groupby(selected_category)[selected_numeric].sum().reset_index()
 
-    fig = px.bar(grouped, x=selected_category, y=selected_numeric,
-                 title="Category Analysis")
+    fig = px.bar(
+        grouped,
+        x=selected_category,
+        y=selected_numeric,
+        title="Category Analysis"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# TIME TREND
+# TIME TREND ANALYSIS
 # =====================================================
 
 if selected_date and selected_numeric:
     trend = df.groupby(selected_date)[selected_numeric].sum().reset_index()
 
-    fig2 = px.line(trend, x=selected_date, y=selected_numeric,
-                   title="Time Trend Analysis")
+    fig2 = px.line(
+        trend,
+        x=selected_date,
+        y=selected_numeric,
+        title="Time Trend Analysis"
+    )
     st.plotly_chart(fig2, use_container_width=True)
 
 # =====================================================
@@ -183,11 +213,13 @@ if selected_date and selected_numeric:
 
 st.subheader("🚨 Anomaly Detection")
 
-if selected_numeric:
-    if df[selected_numeric].std() != 0:
+if selected_numeric and df[selected_numeric].notna().sum() > 0:
+    std_dev = df[selected_numeric].std()
+
+    if std_dev and std_dev != 0:
         df["Z_Score"] = (
             (df[selected_numeric] - df[selected_numeric].mean())
-            / df[selected_numeric].std()
+            / std_dev
         )
 
         anomalies = df[np.abs(df["Z_Score"]) > 3]
@@ -197,6 +229,6 @@ if selected_numeric:
         if len(anomalies) > 0:
             st.dataframe(anomalies, use_container_width=True)
     else:
-        st.info("Insufficient variance for anomaly detection.")
+        st.info("Not enough variance for anomaly detection.")
 
 st.success("🎯 Intelligent Data Engine Active")
