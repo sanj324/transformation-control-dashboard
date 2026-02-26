@@ -1,175 +1,148 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
+import pdfplumber
 
-st.set_page_config(page_title="Transformation Control Dashboard", layout="wide")
+st.set_page_config(page_title="Universal Data Intelligence Dashboard", layout="wide")
 
-st.title("🚀 Transformation Control Dashboard")
+st.title("📊 Universal Data Intelligence Dashboard")
 
-# =========================================================
-# 📂 DATA IMPORT SECTION (CLOUD SAFE)
-# =========================================================
-
-st.sidebar.header("📂 Data Import")
+# =====================================================
+# FILE UPLOAD
+# =====================================================
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload Transformation Excel File",
-    type=["xlsx"]
+    "Upload Excel / CSV / PDF File",
+    type=["xlsx", "csv", "pdf"]
 )
 
-REQUIRED_SHEETS = [
-    "Modules_Tracking",
-    "API_Metrics",
-    "AI_Performance",
-    "Reporting_Adoption",
-    "Revenue_Model",
-    "Risk_Register"
-]
+def parse_pdf(file):
+    all_text = []
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            all_text.append(page.extract_text())
+    return "\n".join(all_text)
 
 def load_data(file):
-    try:
+    if file.name.endswith(".csv"):
+        return pd.read_csv(file)
+
+    elif file.name.endswith(".xlsx"):
         excel = pd.ExcelFile(file)
+        sheet = st.sidebar.selectbox("Select Sheet", excel.sheet_names)
+        return pd.read_excel(file, sheet_name=sheet)
 
-        # Validate required sheets
-        for sheet in REQUIRED_SHEETS:
-            if sheet not in excel.sheet_names:
-                st.error(f"Missing required sheet: {sheet}")
-                st.stop()
+    elif file.name.endswith(".pdf"):
+        text = parse_pdf(file)
+        st.subheader("📄 Extracted PDF Text Preview")
+        st.text(text[:2000])
+        return None
 
-        modules = pd.read_excel(file, sheet_name="Modules_Tracking")
-        api = pd.read_excel(file, sheet_name="API_Metrics")
-        ai = pd.read_excel(file, sheet_name="AI_Performance")
-        reports = pd.read_excel(file, sheet_name="Reporting_Adoption")
-        revenue = pd.read_excel(file, sheet_name="Revenue_Model")
-        risk = pd.read_excel(file, sheet_name="Risk_Register")
-
-        return modules, api, ai, reports, revenue, risk
-
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        st.stop()
+    else:
+        st.error("Unsupported file type")
+        return None
 
 if uploaded_file is None:
-    st.info("👈 Please upload the Transformation Excel file from the sidebar to start.")
+    st.info("Upload file to begin analysis.")
     st.stop()
 
-modules, api, ai, reports, revenue, risk = load_data(uploaded_file)
+df = load_data(uploaded_file)
 
-st.success("✅ File Loaded Successfully")
+if df is None:
+    st.stop()
 
-# =========================================================
-# 1️⃣ TECHNICAL HEALTH
-# =========================================================
+# =====================================================
+# DATA PREVIEW
+# =====================================================
 
-st.header("1️⃣ Technical Health")
+st.subheader("🔍 Data Preview")
+st.dataframe(df, use_container_width=True)
 
-total_modules = len(modules)
-migrated_modules = len(modules[modules["Status"] == "Migrated"])
-pending_modules = total_modules - migrated_modules
+# =====================================================
+# COLUMN MAPPING
+# =====================================================
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Total Modules", total_modules)
-col2.metric("Migrated Modules", migrated_modules)
-col3.metric("Pending Modules", pending_modules)
+st.subheader("🧠 Column Mapping")
 
-if total_modules > 0:
-    st.progress(migrated_modules / total_modules)
+columns = df.columns.tolist()
 
-# =========================================================
-# 2️⃣ API PERFORMANCE
-# =========================================================
+col_date = st.selectbox("Select Date Column (Optional)", ["None"] + columns)
+col_amount = st.selectbox("Select Numeric Column for KPI", ["None"] + columns)
+col_category = st.selectbox("Select Category Column", ["None"] + columns)
 
-st.header("2️⃣ API & Integration Performance")
+# =====================================================
+# FILTER SECTION
+# =====================================================
 
-total_apis = len(api)
+st.subheader("🔎 Filter & Sort")
 
-if total_apis > 0:
-    documented_percent = (api["Documented"] == "Yes").mean() * 100
-    auth_percent = (api["Auth_Enabled"] == "Yes").mean() * 100
-    avg_response = api["Avg_Response_Time_ms"].mean()
-    error_rate = api["Error_Rate_%"].mean()
-else:
-    documented_percent = auth_percent = avg_response = error_rate = 0
+selected_columns = st.multiselect("Select Columns to Display", columns, default=columns)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total APIs", total_apis)
-col2.metric("Documented %", f"{documented_percent:.1f}%")
-col3.metric("Auth Enabled %", f"{auth_percent:.1f}%")
-col4.metric("Avg Response (ms)", f"{avg_response:.0f}")
+filtered_df = df[selected_columns]
 
-st.metric("Avg Error Rate %", f"{error_rate:.2f}")
+sort_column = st.selectbox("Sort By", selected_columns)
+sort_order = st.radio("Order", ["Ascending", "Descending"])
 
-# =========================================================
-# 3️⃣ AI PERFORMANCE
-# =========================================================
+filtered_df = filtered_df.sort_values(
+    by=sort_column,
+    ascending=(sort_order == "Ascending")
+)
 
-st.header("3️⃣ AI Performance")
+st.dataframe(filtered_df, use_container_width=True)
 
-live_models = len(ai[ai["Model_Status"] == "Live"])
-avg_accuracy = ai["Accuracy_%"].mean() if len(ai) else 0
-avg_inference = ai["Inference_Time_ms"].mean() if len(ai) else 0
-avg_impact = ai["Business_Impact_%"].mean() if len(ai) else 0
+# =====================================================
+# KPI SECTION
+# =====================================================
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Live Models", live_models)
-col2.metric("Avg Accuracy %", f"{avg_accuracy:.1f}")
-col3.metric("Avg Inference (ms)", f"{avg_inference:.0f}")
-col4.metric("Business Impact %", f"{avg_impact:.1f}")
+st.subheader("📈 Auto KPI Dashboard")
 
-# =========================================================
-# 4️⃣ REPORTING & ADOPTION
-# =========================================================
+if col_amount != "None":
+    total_value = df[col_amount].sum()
+    avg_value = df[col_amount].mean()
+    max_value = df[col_amount].max()
 
-st.header("4️⃣ Reporting & User Adoption")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total", f"{total_value:,.2f}")
+    col2.metric("Average", f"{avg_value:,.2f}")
+    col3.metric("Maximum", f"{max_value:,.2f}")
 
-migrated_reports = len(reports[reports["Migrated"] == "Yes"])
-adoption_avg = reports["Adoption_%"].mean() if len(reports) else 0
+# =====================================================
+# CATEGORY CHART
+# =====================================================
 
-col1, col2 = st.columns(2)
-col1.metric("Reports Migrated", migrated_reports)
-col2.metric("Average User Adoption %", f"{adoption_avg:.1f}")
+if col_category != "None" and col_amount != "None":
+    grouped = df.groupby(col_category)[col_amount].sum().reset_index()
 
-# =========================================================
-# 5️⃣ REVENUE ALIGNMENT
-# =========================================================
-
-st.header("5️⃣ Revenue Alignment")
-
-total_revenue = revenue["Projected_Revenue"].sum() if len(revenue) else 0
-total_cost_saving = revenue["Annual_Cost_Saving"].sum() if len(revenue) else 0
-
-col1, col2 = st.columns(2)
-col1.metric("Projected Revenue", f"₹ {total_revenue:,.0f}")
-col2.metric("Annual Cost Saving", f"₹ {total_cost_saving:,.0f}")
-
-if len(revenue) > 0:
-    fig = px.bar(
-        revenue,
-        x="Module_Name",
-        y="Projected_Revenue",
-        title="Revenue by Module"
-    )
+    fig = px.bar(grouped, x=col_category, y=col_amount, title="Category Analysis")
     st.plotly_chart(fig, use_container_width=True)
 
-# =========================================================
-# 6️⃣ RISK MANAGEMENT
-# =========================================================
+# =====================================================
+# ANOMALY DETECTION
+# =====================================================
 
-st.header("6️⃣ Risk Management")
+st.subheader("🚨 Anomaly Detection")
 
-if len(risk) > 0:
-    risk["Calculated_Risk"] = risk["Impact_Score_1_10"] * risk["Probability_1_10"]
-    high_risk = len(risk[risk["Calculated_Risk"] > 50])
+if col_amount != "None":
+    df["Z_Score"] = (df[col_amount] - df[col_amount].mean()) / df[col_amount].std()
 
-    st.metric("High Risk Items", high_risk)
+    anomalies = df[np.abs(df["Z_Score"]) > 3]
 
-    fig2 = px.bar(
-        risk,
-        x="Risk_Category",
-        y="Calculated_Risk",
-        color="Calculated_Risk",
-        title="Risk Exposure by Category"
-    )
+    st.metric("Anomaly Count", len(anomalies))
+
+    if len(anomalies) > 0:
+        st.dataframe(anomalies, use_container_width=True)
+
+# =====================================================
+# DATE TREND
+# =====================================================
+
+if col_date != "None" and col_amount != "None":
+    df[col_date] = pd.to_datetime(df[col_date], errors='coerce')
+
+    trend = df.groupby(col_date)[col_amount].sum().reset_index()
+
+    fig2 = px.line(trend, x=col_date, y=col_amount, title="Time Trend Analysis")
     st.plotly_chart(fig2, use_container_width=True)
 
-st.success("🎯 Executive Control Dashboard Active")
+st.success("🎯 Universal Data Intelligence Engine Active")
