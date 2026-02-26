@@ -18,11 +18,11 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 def parse_pdf(file):
-    all_text = []
+    text_data = []
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
-            all_text.append(page.extract_text())
-    return "\n".join(all_text)
+            text_data.append(page.extract_text())
+    return "\n".join(text_data)
 
 def load_data(file):
     if file.name.endswith(".csv"):
@@ -35,12 +35,8 @@ def load_data(file):
 
     elif file.name.endswith(".pdf"):
         text = parse_pdf(file)
-        st.subheader("📄 Extracted PDF Text Preview")
+        st.subheader("📄 Extracted PDF Text")
         st.text(text[:2000])
-        return None
-
-    else:
-        st.error("Unsupported file type")
         return None
 
 if uploaded_file is None:
@@ -53,6 +49,32 @@ if df is None:
     st.stop()
 
 # =====================================================
+# SMART DATA CLEANING
+# =====================================================
+
+# Convert possible numeric text to numeric
+for col in df.columns:
+    try:
+        df[col] = pd.to_numeric(df[col])
+    except:
+        pass
+
+# Detect column types
+numeric_columns = df.select_dtypes(include=np.number).columns.tolist()
+categorical_columns = df.select_dtypes(include="object").columns.tolist()
+
+# Detect date columns
+date_columns = []
+for col in df.columns:
+    try:
+        converted = pd.to_datetime(df[col], errors='coerce')
+        if converted.notna().sum() > len(df) * 0.6:
+            df[col] = converted
+            date_columns.append(col)
+    except:
+        pass
+
+# =====================================================
 # DATA PREVIEW
 # =====================================================
 
@@ -60,28 +82,52 @@ st.subheader("🔍 Data Preview")
 st.dataframe(df, use_container_width=True)
 
 # =====================================================
-# COLUMN MAPPING
+# AUTO COLUMN SELECTION
 # =====================================================
 
-st.subheader("🧠 Column Mapping")
+default_numeric = numeric_columns[0] if numeric_columns else None
+default_category = categorical_columns[0] if categorical_columns else None
+default_date = date_columns[0] if date_columns else None
 
-columns = df.columns.tolist()
+st.subheader("🧠 Intelligent Column Mapping")
 
-col_date = st.selectbox("Select Date Column (Optional)", ["None"] + columns)
-col_amount = st.selectbox("Select Numeric Column for KPI", ["None"] + columns)
-col_category = st.selectbox("Select Category Column", ["None"] + columns)
+col_amount = st.selectbox(
+    "Numeric Column (KPI)",
+    ["Auto"] + numeric_columns,
+    index=0
+)
+
+col_category = st.selectbox(
+    "Category Column",
+    ["Auto"] + categorical_columns,
+    index=0
+)
+
+col_date = st.selectbox(
+    "Date Column",
+    ["Auto"] + date_columns,
+    index=0
+)
+
+selected_numeric = default_numeric if col_amount == "Auto" else col_amount
+selected_category = default_category if col_category == "Auto" else col_category
+selected_date = default_date if col_date == "Auto" else col_date
 
 # =====================================================
-# FILTER SECTION
+# FILTER & SORT
 # =====================================================
 
 st.subheader("🔎 Filter & Sort")
 
-selected_columns = st.multiselect("Select Columns to Display", columns, default=columns)
+display_columns = st.multiselect(
+    "Select Columns to Display",
+    df.columns.tolist(),
+    default=df.columns.tolist()
+)
 
-filtered_df = df[selected_columns]
+filtered_df = df[display_columns]
 
-sort_column = st.selectbox("Sort By", selected_columns)
+sort_column = st.selectbox("Sort By", display_columns)
 sort_order = st.radio("Order", ["Ascending", "Descending"])
 
 filtered_df = filtered_df.sort_values(
@@ -92,30 +138,44 @@ filtered_df = filtered_df.sort_values(
 st.dataframe(filtered_df, use_container_width=True)
 
 # =====================================================
-# KPI SECTION
+# AUTO KPI DASHBOARD
 # =====================================================
 
-st.subheader("📈 Auto KPI Dashboard")
+st.subheader("📈 Intelligent KPI Dashboard")
 
-if col_amount != "None":
-    total_value = df[col_amount].sum()
-    avg_value = df[col_amount].mean()
-    max_value = df[col_amount].max()
+if selected_numeric:
+    total_value = df[selected_numeric].sum()
+    avg_value = df[selected_numeric].mean()
+    max_value = df[selected_numeric].max()
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total", f"{total_value:,.2f}")
     col2.metric("Average", f"{avg_value:,.2f}")
     col3.metric("Maximum", f"{max_value:,.2f}")
+else:
+    st.warning("No numeric column detected.")
 
 # =====================================================
-# CATEGORY CHART
+# CATEGORY ANALYSIS
 # =====================================================
 
-if col_category != "None" and col_amount != "None":
-    grouped = df.groupby(col_category)[col_amount].sum().reset_index()
+if selected_category and selected_numeric:
+    grouped = df.groupby(selected_category)[selected_numeric].sum().reset_index()
 
-    fig = px.bar(grouped, x=col_category, y=col_amount, title="Category Analysis")
+    fig = px.bar(grouped, x=selected_category, y=selected_numeric,
+                 title="Category Analysis")
     st.plotly_chart(fig, use_container_width=True)
+
+# =====================================================
+# TIME TREND
+# =====================================================
+
+if selected_date and selected_numeric:
+    trend = df.groupby(selected_date)[selected_numeric].sum().reset_index()
+
+    fig2 = px.line(trend, x=selected_date, y=selected_numeric,
+                   title="Time Trend Analysis")
+    st.plotly_chart(fig2, use_container_width=True)
 
 # =====================================================
 # ANOMALY DETECTION
@@ -123,26 +183,20 @@ if col_category != "None" and col_amount != "None":
 
 st.subheader("🚨 Anomaly Detection")
 
-if col_amount != "None":
-    df["Z_Score"] = (df[col_amount] - df[col_amount].mean()) / df[col_amount].std()
+if selected_numeric:
+    if df[selected_numeric].std() != 0:
+        df["Z_Score"] = (
+            (df[selected_numeric] - df[selected_numeric].mean())
+            / df[selected_numeric].std()
+        )
 
-    anomalies = df[np.abs(df["Z_Score"]) > 3]
+        anomalies = df[np.abs(df["Z_Score"]) > 3]
 
-    st.metric("Anomaly Count", len(anomalies))
+        st.metric("Anomaly Count", len(anomalies))
 
-    if len(anomalies) > 0:
-        st.dataframe(anomalies, use_container_width=True)
+        if len(anomalies) > 0:
+            st.dataframe(anomalies, use_container_width=True)
+    else:
+        st.info("Insufficient variance for anomaly detection.")
 
-# =====================================================
-# DATE TREND
-# =====================================================
-
-if col_date != "None" and col_amount != "None":
-    df[col_date] = pd.to_datetime(df[col_date], errors='coerce')
-
-    trend = df.groupby(col_date)[col_amount].sum().reset_index()
-
-    fig2 = px.line(trend, x=col_date, y=col_amount, title="Time Trend Analysis")
-    st.plotly_chart(fig2, use_container_width=True)
-
-st.success("🎯 Universal Data Intelligence Engine Active")
+st.success("🎯 Intelligent Data Engine Active")
