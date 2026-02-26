@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.db
+.env
+.DS_Storeg
+Transformation_Data.xlsx
+Transformation_Data_with_Sample.xlsx
